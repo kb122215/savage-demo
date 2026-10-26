@@ -1,61 +1,94 @@
-const express = require('express')
-const app = express()
-const bodyParser = require('body-parser')
-const MongoClient = require('mongodb').MongoClient
+require("dotenv").config();
+const express = require("express");
+const app = express();
+const MongoClient = require("mongodb").MongoClient;
 
-var db, collection;
+let db;
 
-const url = "mongodb+srv://demo:demo@cluster0-q2ojb.mongodb.net/test?retryWrites=true";
+const url = process.env.DB_STRING;
 const dbName = "demo";
 
-app.listen(3000, () => {
-    MongoClient.connect(url, { useNewUrlParser: true, useUnifiedTopology: true }, (error, client) => {
-        if(error) {
-            throw error;
-        }
-        db = client.db(dbName);
-        console.log("Connected to `" + dbName + "`!");
-    });
+app.set("view engine", "ejs");
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.static("public"));
+
+app.get("/", async (req, res) => {
+  try {
+    const result = await db.collection("messages").find().toArray();
+    res.render("index.ejs", { messages: result });
+  } catch (err) {
+    console.log(err);
+    res.status(500).send("Error loading messages");
+  }
 });
 
-app.set('view engine', 'ejs')
-app.use(bodyParser.urlencoded({extended: true}))
-app.use(bodyParser.json())
-app.use(express.static('public'))
+app.post("/messages", async (req, res) => {
+  try {
+    await db
+      .collection("messages")
+      .insertOne({ name: req.body.name, msg: req.body.msg, thumbUp: 0 });
+    console.log("saved to database");
+    res.redirect("/");
+  } catch (err) {
+    console.log(err);
+    res.status(500).send("Error saving message");
+  }
+});
 
-app.get('/', (req, res) => {
-  db.collection('messages').find().toArray((err, result) => {
-    if (err) return console.log(err)
-    res.render('index.ejs', {messages: result})
-  })
-})
+app.put("/messages/thumbUp", async (req, res) => {
+  try {
+    const result = await db
+      .collection("messages")
+      .findOneAndUpdate(
+        { name: req.body.name, msg: req.body.msg },
+        { $inc: { thumbUp: 1 } },
+        { sort: { _id: -1 }, returnDocument: "after" },
+      );
+    res.json(result);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json(err);
+  }
+});
 
-app.post('/messages', (req, res) => {
-  db.collection('messages').insertOne({name: req.body.name, msg: req.body.msg, thumbUp: 0, thumbDown:0}, (err, result) => {
-    if (err) return console.log(err)
-    console.log('saved to database')
-    res.redirect('/')
-  })
-})
+app.put("/messages/thumbDown", async (req, res) => {
+  try {
+    const result = await db
+      .collection("messages")
+      .findOneAndUpdate(
+        { name: req.body.name, msg: req.body.msg },
+        { $inc: { thumbUp: -1 } },
+        { sort: { _id: -1 }, returnDocument: "after" },
+      );
+    res.json(result);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json(err);
+  }
+});
 
-app.put('/messages', (req, res) => {
-  db.collection('messages')
-  .findOneAndUpdate({name: req.body.name, msg: req.body.msg}, {
-    $set: {
-      thumbUp:req.body.thumbUp + 1
-    }
-  }, {
-    sort: {_id: -1},
-    upsert: true
-  }, (err, result) => {
-    if (err) return res.send(err)
-    res.send(result)
-  })
-})
+app.delete("/messages", async (req, res) => {
+  try {
+    await db
+      .collection("messages")
+      .findOneAndDelete({ name: req.body.name, msg: req.body.msg });
+    res.json("Message deleted!");
+  } catch (err) {
+    console.log(err);
+    res.status(500).json(err);
+  }
+});
 
-app.delete('/messages', (req, res) => {
-  db.collection('messages').findOneAndDelete({name: req.body.name, msg: req.body.msg}, (err, result) => {
-    if (err) return res.send(500, err)
-    res.send('Message deleted!')
-  })
-})
+const start = async () => {
+  const client = await MongoClient.connect(url);
+  db = client.db(dbName);
+  console.log(`Connected to ${dbName}!`);
+  app.listen(3000, () =>
+    console.log("Server running on http://localhost:3000"),
+  );
+};
+
+start().catch((err) =>
+  console.log("Could not connect to MongoDB:", err.message),
+);
